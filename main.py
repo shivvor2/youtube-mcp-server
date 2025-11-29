@@ -917,6 +917,17 @@ async def get_video_comments(
     Returns:
         A formatted string with video comments, including any deep replies fetched.
     """
+
+    if max_top_level_comments <= 0:
+        raise ValueError(
+            f"`max_top_level_comments` must be a positive integer, but received {max_top_level_comments}."
+        )
+
+    if max_deep_replies_count < 0:
+        raise ValueError(
+            f"`max_deep_replies_count` must be a non-negative integer, but received {max_deep_replies_count}."
+        )
+
     video_id = get_video_id_from_url(video_input)
     if not video_id:
         return f"Error: Could not extract video ID from '{video_input}'. Please provide a valid YouTube URL or 11-character video ID."
@@ -942,7 +953,7 @@ async def get_video_comments(
             total_comment_count = int(
                 video_data["items"][0].get("statistics", {}).get("commentCount", 0)
             )
-        except:
+        except Exception:
             video_title = "Unknown Video"
             total_comment_count = "Unknown"
 
@@ -1004,7 +1015,7 @@ async def get_video_comments(
                         if not reply_page_token:
                             break
 
-                    all_comments[i]["replies"]["comments"] = full_replies
+                    all_comments[i].setdefault("replies", {})["comments"] = full_replies
                     all_comments[i]["deep_fetch_complete"] = True
                     deep_fetches_done += 1
 
@@ -1064,7 +1075,7 @@ Comments:
         return result
 
     except Exception as e:
-        if "commentsDisabled" in str(e).lower():
+        if "commentsDisabled" in str(e):
             return f"Comments are disabled for video '{video_id}'."
         return f"Error fetching video comments: {str(e)}"
 

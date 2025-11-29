@@ -288,11 +288,13 @@ async def test_video_comments():
 
     try:
         # Test with deep reply fetching enabled
+        max_top_level_comments = 5
+        max_deep_replies_count = 2
         result = await get_video_comments(
             test_video,
-            max_top_level_comments=5,
+            max_top_level_comments=max_top_level_comments,
             order="relevance",
-            max_deep_replies_count=2,
+            max_deep_replies_count=max_deep_replies_count,
         )
         if "Error" in result or "disabled" in result:
             print(f"⚠️ {result}")
@@ -303,7 +305,10 @@ async def test_video_comments():
             print(f"Preview: {result[:500]}...")
 
             # Verify that deep fetching worked as expected
-            if "Deep Replies Fetched: 2" in result and "(all fetched)" in result:
+            if (
+                f"Deep Replies Fetched: {max_deep_replies_count}" in result
+                and "(all fetched)" in result
+            ):
                 print("✅ Deep reply fetching appears to be working correctly.")
                 return True
             else:
