@@ -9,6 +9,7 @@ Run this to verify your API key and server setup.
 import os
 import sys
 import asyncio
+import main
 from main import (
     get_video_details,
     get_playlist_details,
@@ -26,6 +27,18 @@ from main import (
     get_video_transcript,
     load_api_key,
 )
+from fastmcp.tools import FunctionTool
+
+
+# --- Dynamic Rebinding ---
+# All decorated `@mcp.tool`s are `FunctionTool`s, which cannot be directly called
+# We find all decorated @mcp.tool objects imported from main and replaces them in
+# this script's global scope with their underlying callable .func.
+
+for name in dir(main):
+    obj = getattr(main, name)
+    if isinstance(obj, FunctionTool):
+        globals()[name] = obj.fn
 
 
 async def test_api_key():
@@ -274,15 +287,32 @@ async def test_video_comments():
     print(f"Testing with video ID: {test_video}")
 
     try:
-        result = await get_video_comments(test_video, max_results=3, order="relevance")
+        # Test with deep reply fetching enabled
+        result = await get_video_comments(
+            test_video,
+            max_top_level_comments=5,
+            order="relevance",
+            max_deep_replies_count=2,
+        )
         if "Error" in result or "disabled" in result:
             print(f"⚠️ {result}")
-            # This might be expected if comments are disabled
-            return True  # We'll consider this a pass since the function worked
+            # This might be expected if comments are disabled on a test video
+            return True
         else:
             print("✅ Video comments retrieved successfully!")
-            print(f"Preview: {result[:400]}...")
-            return True
+            print(f"Preview: {result[:500]}...")
+
+            # Verify that deep fetching worked as expected
+            if "Deep Replies Fetched: 2" in result and "(all fetched)" in result:
+                print("✅ Deep reply fetching appears to be working correctly.")
+                return True
+            else:
+                print("❌ Failed to verify deep reply fetching.")
+                print(
+                    "   Expected to find 'Deep Replies Fetched: 2' and '(all fetched)' in the output."
+                )
+                return False
+
     except Exception as e:
         print(f"❌ Exception: {e}")
         return False

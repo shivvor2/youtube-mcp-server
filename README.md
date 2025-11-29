@@ -14,7 +14,7 @@ A comprehensive Model Context Protocol (MCP) server that provides real-time YouT
 6. **`get_channel_videos`** - Get recent videos from a YouTube channel
 7. **`search_videos`** - Search YouTube for videos with customizable parameters
 8. **`get_trending_videos`** - Retrieve trending videos for specific regions
-9. **`get_video_comments`** - Get comments from videos with sorting options
+9. **`get_video_comments`** - Get comments with pagination and controlled deep reply fetching
 10. **`analyze_video_engagement`** - Analyze engagement metrics and provide insights
 11. **`get_channel_playlists`** - List playlists from a YouTube channel
 12. **`get_video_caption_info`** - Get available caption/transcript information
@@ -230,6 +230,9 @@ engagement = await analyze_video_engagement("dQw4w9WgXcQ")
 
 # Get video comments
 comments = await get_video_comments("dQw4w9WgXcQ", max_results=10, order="relevance")
+
+# Get comments and fetch all replies for the top 2 most relevant threads
+deep_comments = await get_video_comments("dQw4w9WgXcQ", max_top_level_comments=10, max_deep_replies_count=2)
 ```
 
 ## 🎯 Function Reference
@@ -244,7 +247,7 @@ comments = await get_video_comments("dQw4w9WgXcQ", max_results=10, order="releva
 | `get_channel_videos`                | Recent channel videos      | Latest uploads with details                  |
 | `search_videos`                     | Video search               | Multiple sort orders, filters                |
 | `get_trending_videos`               | Trending content           | Region-specific trending videos              |
-| `get_video_comments`                | Video comments             | Sorting, reply counts                        |
+| `get_video_comments`                | Video comments             | Pagination, deep reply fetching, sorting     |
 | `analyze_video_engagement`          | Engagement metrics         | Industry benchmarks, insights                |
 | `get_channel_playlists`             | Channel playlists          | All public playlists                         |
 | `get_video_caption_info`            | Caption availability       | Languages, manual vs auto                    |
