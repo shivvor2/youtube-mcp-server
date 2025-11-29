@@ -888,134 +888,196 @@ Videos:
 
 @mcp.tool()
 async def get_video_comments(
-    video_input: str, max_results: int = 10, order: str = "relevance"
+    video_input: str,
+    max_top_level_comments: int = 50,
+    order: str = "relevance",
+    max_deep_replies_count: int = 10,
 ) -> str:
     """
-    Get comments from a YouTube video.
+    Get comments from a YouTube video, with controlled fetching of deep replies.
+
+    The YouTube API includes up to 5 replies per comment thread in the initial response.
+    This function can perform additional, costly API calls to fetch the complete
+    reply list for a specified number of the most relevant comment threads.
+
+    COST:
+    - Top-level comments: 1 quota unit per 100 comments fetched.
+    - Deep replies: 1 additional quota unit for EACH thread specified by `max_deep_replies_count`.
 
     Args:
-        video_input: YouTube video URL or video ID
-        max_results: Maximum number of comments to return (default: 10, max: 50)
-        order: Sort order - time, relevance (default: relevance)
+        video_input: YouTube video URL or video ID.
+        max_top_level_comments: The total number of top-level comments to retrieve.
+                                (default: 50)
+        order: Sort order for top-level comments ('time' or 'relevance').
+               (default: 'relevance')
+        max_deep_replies_count: Fetches all replies for up to this many top-level
+                                comments. Set to 0 to disable this costly feature.
+                                (default: 10)
 
     Returns:
-        Formatted string with video comments
+        A formatted string with video comments, including any deep replies fetched.
     """
-    # Extract video ID from URL or use as-is if it's already an ID
+
+    if max_top_level_comments <= 0:
+        raise ValueError(
+            f"`max_top_level_comments` must be a positive integer, but received {max_top_level_comments}."
+        )
+
+    if max_deep_replies_count < 0:
+        raise ValueError(
+            f"`max_deep_replies_count` must be a non-negative integer, but received {max_deep_replies_count}."
+        )
+
     video_id = get_video_id_from_url(video_input)
     if not video_id:
         return f"Error: Could not extract video ID from '{video_input}'. Please provide a valid YouTube URL or 11-character video ID."
 
-    # Validate max_results
-    max_results = max(1, min(50, max_results))
-
-    # Validate order parameter
     valid_orders = ["time", "relevance"]
     if order not in valid_orders:
         order = "relevance"
 
+    all_comments = []
+    page_token = None
+
     try:
-        # Get video comments
-        comments_data = await make_youtube_api_request(
-            "commentThreads",
-            {
-                "part": "snippet,replies",
-                "videoId": video_id,
-                "order": order,
-                "maxResults": max_results,
-                "textFormat": "plainText",  # Get plain text instead of HTML
-            },
-        )
-
-        if not comments_data.get("items"):
-            return f"No comments found for video '{video_id}'. Comments may be disabled or the video may not exist."
-
-        comments = comments_data["items"]
-        total_results = comments_data.get("pageInfo", {}).get(
-            "totalResults", len(comments)
-        )
-
         # Get basic video info for context
         try:
             video_data = await make_youtube_api_request(
-                "videos", {"part": "snippet", "id": video_id}
+                "videos", {"part": "snippet,statistics", "id": video_id}
             )
             video_title = (
                 video_data["items"][0]["snippet"]["title"]
                 if video_data.get("items")
                 else "Unknown Video"
             )
-        except:
+            total_comment_count = int(
+                video_data["items"][0].get("statistics", {}).get("commentCount", 0)
+            )
+        except Exception:
             video_title = "Unknown Video"
+            total_comment_count = "Unknown"
 
+        # 1. Fetch top-level comments
+        while len(all_comments) < max_top_level_comments:
+            num_to_fetch = min(100, max_top_level_comments - len(all_comments))
+            if num_to_fetch <= 0:
+                break
+
+            params = {
+                "part": "snippet,replies",
+                "videoId": video_id,
+                "order": order,
+                "maxResults": num_to_fetch,
+                "textFormat": "plainText",
+            }
+            if page_token:
+                params["pageToken"] = page_token
+
+            comments_data = await make_youtube_api_request("commentThreads", params)
+
+            if not comments_data.get("items"):
+                break
+            all_comments.extend(comments_data["items"])
+            page_token = comments_data.get("nextPageToken")
+            if not page_token:
+                break
+
+        # 2. Fetch deep replies if requested
+        deep_fetches_done = 0
+        if max_deep_replies_count > 0:
+            for i, thread in enumerate(all_comments):
+                if deep_fetches_done >= max_deep_replies_count:
+                    break
+
+                snippet = thread.get("snippet", {})
+                total_reply_count = snippet.get("totalReplyCount", 0)
+                initial_replies = thread.get("replies", {}).get("comments", [])
+
+                if total_reply_count > len(initial_replies):
+                    parent_id = snippet["topLevelComment"]["id"]
+                    full_replies = []
+                    reply_page_token = None
+                    while True:
+                        reply_params = {
+                            "part": "snippet",
+                            "parentId": parent_id,
+                            "maxResults": 100,
+                            "textFormat": "plainText",
+                        }
+                        if reply_page_token:
+                            reply_params["pageToken"] = reply_page_token
+
+                        replies_response = await make_youtube_api_request(
+                            "comments", reply_params
+                        )
+                        full_replies.extend(replies_response.get("items", []))
+                        reply_page_token = replies_response.get("nextPageToken")
+                        if not reply_page_token:
+                            break
+
+                    all_comments[i].setdefault("replies", {})["comments"] = full_replies
+                    all_comments[i]["deep_fetch_complete"] = True
+                    deep_fetches_done += 1
+
+        if not all_comments:
+            return (
+                f"No comments found for video '{video_id}'. Comments may be disabled."
+            )
+
+        # 3. Format the final output string
         result = f"""YouTube Video Comments:
 
 Video: {video_title}
 Video ID: {video_id}
 Sort Order: {order.title()}
-Showing: {len(comments)} of {total_results:,} comments
+Showing: {len(all_comments)} top-level comments (of approx. {total_comment_count:,} total)
+Deep Replies Fetched: {deep_fetches_done} comment threads
 
 Comments:
 """
 
-        for i, comment_thread in enumerate(comments, 1):
-            top_comment = comment_thread.get("snippet", {}).get("topLevelComment", {})
-            comment_snippet = top_comment.get("snippet", {})
+        for i, comment_thread in enumerate(all_comments, 1):
+            top_comment = comment_thread["snippet"]["topLevelComment"]
+            comment_snippet = top_comment["snippet"]
 
-            # Get comment details
             author = comment_snippet.get("authorDisplayName", "Unknown")
             comment_text = comment_snippet.get("textDisplay", "No text")
             like_count = int(comment_snippet.get("likeCount", 0))
-            published = comment_snippet.get("publishedAt", "Unknown")
+            published = comment_snippet.get("publishedAt", "Unknown")[:10]
+            like_display = f"{like_count:,} likes" if like_count > 0 else "No likes"
 
-            # Format publish date
-            if published != "Unknown":
-                published = published[:10]  # Just the date part
+            result += f"\n{i}. {author} ({published})\n   Likes: {like_display}\n   Comment: {comment_text}\n"
 
-            # Format like count
-            if like_count >= 1000:
-                like_display = f"{like_count/1000:.1f}K likes"
-            else:
-                like_display = f"{like_count:,} likes" if like_count > 0 else "No likes"
+            replies_data = comment_thread.get("replies", {})
+            total_reply_count = comment_thread["snippet"]["totalReplyCount"]
 
-            # Truncate long comments
-            if len(comment_text) > 200:
-                comment_text = comment_text[:200] + "..."
-
-            result += f"""
-{i}. {author}
-   Posted: {published}
-   {like_display}
-   Comment: {comment_text}
-"""
-
-            # Check for replies
-            replies = comment_thread.get("replies", {})
-            reply_count = replies.get("totalReplyCount", 0)
-            if reply_count > 0:
-                result += (
-                    f"\n   📝 {reply_count} repl{'y' if reply_count == 1 else 'ies'}"
+            if total_reply_count > 0:
+                reply_comments = replies_data.get("comments", [])
+                status = (
+                    "(all fetched)"
+                    if comment_thread.get("deep_fetch_complete")
+                    else f"(showing {len(reply_comments)})"
                 )
+                result += f"   Replies: {total_reply_count} {status}\n"
 
-            result += "\n"
+                for reply in reply_comments:
+                    reply_snippet = reply["snippet"]
+                    reply_author = reply_snippet.get("authorDisplayName", "Unknown")
+                    reply_text = reply_snippet.get("textDisplay", "No text")
+                    reply_likes = int(reply_snippet.get("likeCount", 0))
+                    reply_like_display = f"{reply_likes:,} likes"
 
-        if total_results > len(comments):
-            result += (
-                f"\n... and {total_results - len(comments):,} more comments available"
-            )
+                    result += f"     - {reply_author} | {reply_like_display}\n       {reply_text}\n"
 
-        result += f"\n\nNote: Comments are sorted by {order}. Some comments may be filtered by YouTube."
+        if page_token and len(all_comments) == max_top_level_comments:
+            result += "\n... and more top-level comments available. Increase `max_top_level_comments` to fetch more."
 
         return result
 
     except Exception as e:
-        # Handle specific API errors
-        if "commentsDisabled" in str(e) or "disabled" in str(e).lower():
+        if "commentsDisabled" in str(e):
             return f"Comments are disabled for video '{video_id}'."
-        elif "quotaExceeded" in str(e):
-            return "Error: YouTube API quota exceeded. Please try again later."
-        else:
-            return f"Error fetching video comments: {str(e)}"
+        return f"Error fetching video comments: {str(e)}"
 
 
 @mcp.tool()
@@ -1839,7 +1901,7 @@ Available Tools:
 6. get_channel_videos(channel_input, max_results) - Get recent videos from a YouTube channel
 7. search_videos(query, max_results, order) - Search YouTube for videos by keywords
 8. get_trending_videos(region_code, max_results) - Get trending videos from YouTube for a specific region
-9. get_video_comments(video_input, max_results, order) - Get comments from a YouTube video
+9. get_video_comments(video_input, max_top_level_comments, order, max_deep_replies_count) - Get video comments with controlled deep reply fetching
 10. analyze_video_engagement(video_input) - Analyze video engagement metrics and provide insights
 11. get_channel_playlists(channel_input, max_results) - Get playlists from a YouTube channel
 12. get_video_caption_info(video_input, language) - Get available caption/transcript information
@@ -1865,7 +1927,7 @@ API Quota Usage (per call):
 - get_channel_videos: 101 units (1 for channel lookup + 100 for search)
 - search_videos: 101 units (100 for search + 1 for additional details)
 - get_trending_videos: 1 unit
-- get_video_comments: 1 unit
+- get_video_comments: 1 unit per 100 top-level comments + 1 unit per deep reply thread requested
 - analyze_video_engagement: 1 unit (reuses video details)
 - get_channel_playlists: 1 unit
 - get_video_caption_info: 50 units (captions API)
