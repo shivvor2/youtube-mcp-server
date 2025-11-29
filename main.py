@@ -40,6 +40,7 @@ YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 
 def get_key_from_yaml(file_path: Path | str) -> str | None:
     """Load YouTube API key from credentials.yml file."""
+    file_path = Path(file_path)
     if not file_path.is_file():
         return None
     try:
