@@ -96,7 +96,7 @@ This will run comprehensive tests on all 14 functions to ensure everything is wo
   "mcpServers": {
     "youtube": {
       "command": "python",
-      "args": ["/path/to/youtube-mcp-server/youtube_mcp_server.py"],
+      "args": ["/path/to/main.py"],
       "env": {
         "YOUTUBE_API_KEY": "your_youtube_api_key_here"
       }
