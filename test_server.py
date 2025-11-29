@@ -24,6 +24,7 @@ from main import (
     get_video_caption_info,
     evaluate_video_for_knowledge_base,
     get_video_transcript,
+    load_api_key,
 )
 
 
@@ -31,11 +32,17 @@ async def test_api_key():
     """Test if the YouTube API key is working."""
     print("🔑 Testing YouTube API key...")
 
-    api_key = os.getenv("YOUTUBE_API_KEY")
+    api_key = load_api_key()
     if not api_key:
-        print("❌ YOUTUBE_API_KEY environment variable not set!")
-        print("\nPlease set your API key:")
-        print("export YOUTUBE_API_KEY='your_api_key_here'")
+        print("❌ Unable to resolve a YouTube API key using any source.")
+        print("\nThe loader looked for the key in the following order:")
+        print("  1. YOUTUBE_API_KEY environment variable")
+        print("  2. .env file in the project root (via python-dotenv)")
+        print("  3. credentials.yml / credentials.yaml in the project root")
+        print("\nPlease configure at least one of these, for example:")
+        print("  export YOUTUBE_API_KEY='your_api_key_here'")
+        print("    or")
+        print('  echo "YOUTUBE_API_KEY: your_api_key_here" > credentials.yml')
         return False
 
     print(f"✅ API key found: {api_key[:10]}{'*' * (len(api_key) - 10)}")
